@@ -1,0 +1,188 @@
+[
+  {
+    "id": "greeting",
+    "question": "Hi there",
+    "expect": "greeting"
+  },
+  {
+    "id": "debouncing_keyword",
+    "question": "debouncing",
+    "expect": "retrieve",
+    "context_must_contain": ["debounc"]
+  },
+  {
+    "id": "debouncing_question",
+    "question": "What is debouncing?",
+    "expect": "retrieve",
+    "context_must_contain": ["debounc", "delay"]
+  },
+  {
+    "id": "debouncing_answer",
+    "question": "What is debouncing?",
+    "expect": "answer",
+    "answer_must_contain": ["debounc", "delay"],
+    "mock_llm_response": "Debouncing delays a function until the user stops triggering events for a set time."
+  },
+  {
+    "id": "usestate",
+    "question": "useState",
+    "expect": "retrieve",
+    "context_must_contain": ["usestate", "state"]
+  },
+  {
+    "id": "usestate_answer",
+    "question": "What is useState?",
+    "expect": "answer",
+    "answer_must_contain": ["state", "setter"],
+    "mock_llm_response": "useState stores and updates local state and returns the value plus a setter function."
+  },
+  {
+    "id": "useeffect",
+    "question": "useEffect",
+    "expect": "retrieve",
+    "context_must_contain": ["useeffect", "side effect"]
+  },
+  {
+    "id": "useref",
+    "question": "useRef",
+    "expect": "retrieve",
+    "context_must_contain": ["useref"]
+  },
+  {
+    "id": "react_vs_rn",
+    "question": "React vs React Native",
+    "expect": "retrieve",
+    "context_must_contain": ["react native", "dom"]
+  },
+  {
+    "id": "react_native_architecture",
+    "question": "React Native architecture threads",
+    "expect": "retrieve",
+    "context_must_contain": ["javascript", "thread"]
+  },
+  {
+    "id": "flatlist",
+    "question": "FlatList performance",
+    "expect": "retrieve",
+    "context_must_contain": ["flatlist"]
+  },
+  {
+    "id": "navigation_rn",
+    "question": "Navigation in React Native",
+    "expect": "retrieve",
+    "context_must_contain": ["navigation"]
+  },
+  {
+    "id": "redux_toolkit",
+    "question": "Redux Toolkit",
+    "expect": "retrieve",
+    "context_must_contain": ["redux"]
+  },
+  {
+    "id": "event_loop",
+    "question": "The Event Loop",
+    "expect": "retrieve",
+    "context_must_contain": ["event loop"]
+  },
+  {
+    "id": "promises",
+    "question": "JavaScript Promises",
+    "expect": "retrieve",
+    "context_must_contain": ["promise"]
+  },
+  {
+    "id": "closures",
+    "question": "What is a closure?",
+    "expect": "retrieve",
+    "context_must_contain": ["closure", "outer"]
+  },
+  {
+    "id": "closures_answer",
+    "question": "What is a closure?",
+    "expect": "answer",
+    "answer_must_contain": ["outer", "function"],
+    "mock_llm_response": "A closure is a function that keeps access to variables from its outer scope after the outer function finishes."
+  },
+  {
+    "id": "throttling",
+    "question": "throttling",
+    "expect": "retrieve",
+    "context_must_contain": ["throttl"]
+  },
+  {
+    "id": "currying",
+    "question": "currying",
+    "expect": "retrieve",
+    "context_must_contain": ["curry"]
+  },
+  {
+    "id": "hoisting",
+    "question": "JavaScript hoisting",
+    "expect": "retrieve",
+    "context_must_contain": ["hoist"]
+  },
+  {
+    "id": "flutter_stateless",
+    "question": "StatelessWidget",
+    "expect": "retrieve",
+    "context_must_contain": ["statelesswidget", "immutable"]
+  },
+  {
+    "id": "flutter_stateful",
+    "question": "StatefulWidget",
+    "expect": "retrieve",
+    "context_must_contain": ["statefulwidget", "setstate"]
+  },
+  {
+    "id": "future_builder",
+    "question": "FutureBuilder",
+    "expect": "retrieve",
+    "context_must_contain": ["futurebuilder", "future"]
+  },
+  {
+    "id": "streambuilder",
+    "question": "StreamBuilder",
+    "expect": "retrieve",
+    "context_must_contain": ["streambuilder", "stream"]
+  },
+  {
+    "id": "valuekey",
+    "question": "ValueKey Flutter",
+    "expect": "retrieve",
+    "context_must_contain": ["valuekey"]
+  },
+  {
+    "id": "listview_builder",
+    "question": "ListView builder",
+    "expect": "retrieve",
+    "context_must_contain": ["listview"]
+  },
+  {
+    "id": "usereducer",
+    "question": "useReducer",
+    "expect": "retrieve",
+    "context_must_contain": ["usereducer", "redux"]
+  },
+  {
+    "id": "bridging_flutter",
+    "question": "Platform Channels bridging",
+    "expect": "retrieve",
+    "context_must_contain": ["platform", "channel", "native"]
+  },
+  {
+    "id": "outside_kb",
+    "question": "What is mechanical engineering?",
+    "expect": "fallback"
+  },
+  {
+    "id": "outside_kb_answer",
+    "question": "What is mechanical engineering?",
+    "expect": "answer",
+    "mock_llm_response": "Sorry, I don't have this information in my knowledge base."
+  },
+  {
+    "id": "quantum",
+    "question": "Explain quantum chromodynamics",
+    "expect": "fallback"
+  }
+]

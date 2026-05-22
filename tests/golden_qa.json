@@ -5,6 +5,13 @@
     "expect": "greeting"
   },
   {
+    "id": "follow_up_abstraction_example",
+    "question": "give me an example",
+    "expect": "retrieve",
+    "history": [["What is abstraction?", "Abstraction hides unnecessary implementation details."]],
+    "context_must_contain": ["abstraction", "analogy"]
+  },
+  {
     "id": "debouncing_keyword",
     "question": "debouncing",
     "expect": "retrieve",
@@ -20,6 +27,7 @@
     "id": "debouncing_answer",
     "question": "What is debouncing?",
     "expect": "answer",
+    "context_must_contain": ["debouncing", "delay"],
     "answer_must_contain": ["debounc", "delay"],
     "mock_llm_response": "Debouncing delays a function until the user stops triggering events for a set time."
   },
@@ -33,6 +41,7 @@
     "id": "usestate_answer",
     "question": "What is useState?",
     "expect": "answer",
+    "context_must_contain": ["usestate", "state"],
     "answer_must_contain": ["state", "setter"],
     "mock_llm_response": "useState stores and updates local state and returns the value plus a setter function."
   },
@@ -100,6 +109,7 @@
     "id": "closures_answer",
     "question": "What is a closure?",
     "expect": "answer",
+    "context_must_contain": ["closure", "outer"],
     "answer_must_contain": ["outer", "function"],
     "mock_llm_response": "A closure is a function that keeps access to variables from its outer scope after the outer function finishes."
   },
@@ -147,9 +157,9 @@
   },
   {
     "id": "valuekey",
-    "question": "ValueKey Flutter",
+    "question": "ValueKey",
     "expect": "retrieve",
-    "context_must_contain": ["valuekey"]
+    "context_must_contain": ["valuekey", "unique identifier"]
   },
   {
     "id": "listview_builder",

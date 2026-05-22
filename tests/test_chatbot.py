@@ -29,20 +29,27 @@ class FakeLLM:
         return SimpleNamespace(content=self.content)
 
 
-def make_doc(text, source="data/mock.txt"):
-    return SimpleNamespace(page_content=text, metadata={"source": source})
+def make_doc(text, source="data/mock.txt", header_2=None):
+    metadata = {"source": source}
+    if header_2:
+        metadata["Header 2"] = header_2
+    return SimpleNamespace(page_content=text, metadata=metadata)
+
+
+def identity_rerank(_question, documents):
+    return [1.0] * len(documents)
 
 
 class ChatbotBehaviorTests(unittest.TestCase):
     def test_greeting_returns_exact_message(self):
         self.assertEqual(ask_question("Hi there"), EXACT_GREETING_RESPONSE)
 
-    @patch("app.chat.chatbot._get_local_chunks", return_value=())
+    @patch("app.chat.chatbot.rerank_pairs", side_effect=identity_rerank)
     @patch("app.chat.chatbot.get_vector_store")
     def test_no_relevant_results_returns_exact_fallback(
         self,
         mock_get_vector_store,
-        _mock_local_chunks,
+        _mock_rerank,
     ):
         mock_get_vector_store.return_value = FakeVectorStore()
 
@@ -51,12 +58,12 @@ class ChatbotBehaviorTests(unittest.TestCase):
             EXACT_FALLBACK_RESPONSE,
         )
 
-    @patch("app.chat.chatbot._get_local_chunks", return_value=())
+    @patch("app.chat.chatbot.rerank_pairs", side_effect=identity_rerank)
     @patch("app.chat.chatbot.get_vector_store")
     def test_unrelated_vector_match_is_ignored(
         self,
         mock_get_vector_store,
-        _mock_local_chunks,
+        _mock_rerank,
     ):
         unrelated_doc = make_doc("This is about Flutter widgets.")
         mock_get_vector_store.return_value = FakeVectorStore(
@@ -68,14 +75,14 @@ class ChatbotBehaviorTests(unittest.TestCase):
             EXACT_FALLBACK_RESPONSE,
         )
 
+    @patch("app.chat.chatbot.rerank_pairs", side_effect=identity_rerank)
     @patch("app.chat.chatbot.get_llm")
     @patch("app.chat.chatbot.get_vector_store")
-    @patch("app.chat.chatbot._get_local_chunks")
     def test_contents_chunk_is_ignored_when_real_match_exists(
         self,
-        mock_local_chunks,
         mock_get_vector_store,
         mock_get_llm,
+        _mock_rerank,
     ):
         contents_doc = make_doc(
             "Contents 1. ListView 2. RecyclerView 3. Intents",
@@ -84,9 +91,11 @@ class ChatbotBehaviorTests(unittest.TestCase):
         actual_doc = make_doc(
             "RecyclerView Is a more advanced version of ListView with improved performance and other benefits. Recycler View can take position horizontally and vertically.",
             source="data/android.docx",
+            header_2="RecyclerView",
         )
-        mock_local_chunks.return_value = (contents_doc, actual_doc)
-        mock_get_vector_store.side_effect = RuntimeError("vector store unavailable")
+        mock_get_vector_store.return_value = FakeVectorStore(
+            relevance_results=[(contents_doc, 0.4), (actual_doc, 0.9)],
+        )
         fake_llm = FakeLLM("RecyclerView answer")
         mock_get_llm.return_value = fake_llm
 
@@ -96,21 +105,22 @@ class ChatbotBehaviorTests(unittest.TestCase):
         self.assertIn(actual_doc.page_content, fake_llm.prompts[0])
         self.assertNotIn(contents_doc.page_content, fake_llm.prompts[0])
 
+    @patch("app.chat.chatbot.rerank_pairs", side_effect=identity_rerank)
     @patch("app.chat.chatbot.get_llm")
     @patch("app.chat.chatbot.get_vector_store")
-    @patch("app.chat.chatbot._get_local_chunks")
-    def test_local_inheritance_match_builds_prompt_from_retrieved_context(
+    def test_inheritance_match_builds_prompt_from_retrieved_context(
         self,
-        mock_local_chunks,
         mock_get_vector_store,
         mock_get_llm,
+        _mock_rerank,
     ):
         inheritance_doc = make_doc(
             "Inheritance: Kisi bhi class ki properties aur methods ko dusri classes ma resuable kernay ka liye use kerty hain.",
             source="data/oop.txt",
         )
-        mock_local_chunks.return_value = (inheritance_doc,)
-        mock_get_vector_store.side_effect = RuntimeError("vector store unavailable")
+        mock_get_vector_store.return_value = FakeVectorStore(
+            relevance_results=[(inheritance_doc, 0.8)],
+        )
         fake_llm = FakeLLM(
             "Inheritance means reusing the properties and methods of one class in other classes."
         )
@@ -126,23 +136,24 @@ class ChatbotBehaviorTests(unittest.TestCase):
         self.assertIn(inheritance_doc.page_content, fake_llm.prompts[0])
         self.assertIn("What is inheritance?", fake_llm.prompts[0])
 
+    @patch("app.chat.chatbot.rerank_pairs", side_effect=identity_rerank)
     @patch("app.chat.chatbot.get_llm")
-    @patch("app.chat.chatbot.get_vector_store")
     @patch("app.chat.chatbot._get_corpus_terms", return_value=("polymorphism",))
-    @patch("app.chat.chatbot._get_local_chunks")
+    @patch("app.chat.chatbot.get_vector_store")
     def test_misspelled_query_is_refined_to_matching_knowledge_base_term(
         self,
-        mock_local_chunks,
-        _mock_corpus_terms,
         mock_get_vector_store,
+        _mock_corpus_terms,
         mock_get_llm,
+        _mock_rerank,
     ):
         polymorphism_doc = make_doc(
             "Polymorphism: Aik method different action perform ker raha hai.",
             source="data/OOP.docx",
         )
-        mock_local_chunks.return_value = (polymorphism_doc,)
-        mock_get_vector_store.side_effect = RuntimeError("vector store unavailable")
+        mock_get_vector_store.return_value = FakeVectorStore(
+            relevance_results=[(polymorphism_doc, 0.8)],
+        )
         fake_llm = FakeLLM("Polymorphism means one method can perform different actions.")
         mock_get_llm.return_value = fake_llm
 
@@ -156,21 +167,23 @@ class ChatbotBehaviorTests(unittest.TestCase):
         self.assertIn(polymorphism_doc.page_content, fake_llm.prompts[0])
         self.assertIn("RETRIEVAL QUESTION:\npolymorphism", fake_llm.prompts[0])
 
+    @patch("app.chat.chatbot.rerank_pairs", side_effect=identity_rerank)
     @patch("app.chat.chatbot.get_llm")
     @patch("app.chat.chatbot.get_vector_store")
-    @patch("app.chat.chatbot._get_local_chunks")
-    def test_local_debouncing_match_builds_prompt_from_retrieved_context(
+    def test_debouncing_match_builds_prompt_from_retrieved_context(
         self,
-        mock_local_chunks,
         mock_get_vector_store,
         mock_get_llm,
+        _mock_rerank,
     ):
         debouncing_doc = make_doc(
             "What is Debouncing?(wait until stop) Use case: Search input optimization.",
-            source="data/React Native Notes/Umair React Native Notes.docx",
+            source="data/React Native Notes/React_Native_Interview_Knowledge_Base.md",
+            header_2="Debouncing",
         )
-        mock_local_chunks.return_value = (debouncing_doc,)
-        mock_get_vector_store.side_effect = RuntimeError("vector store unavailable")
+        mock_get_vector_store.return_value = FakeVectorStore(
+            relevance_results=[(debouncing_doc, 0.85)],
+        )
         fake_llm = FakeLLM(
             "Debouncing waits until the action stops, and a use case is search input optimization."
         )
@@ -186,21 +199,22 @@ class ChatbotBehaviorTests(unittest.TestCase):
         self.assertIn(debouncing_doc.page_content, fake_llm.prompts[0])
         self.assertIn("debouncing", fake_llm.prompts[0])
 
+    @patch("app.chat.chatbot.rerank_pairs", side_effect=identity_rerank)
     @patch("app.chat.chatbot.get_llm")
     @patch("app.chat.chatbot.get_vector_store")
-    @patch("app.chat.chatbot._get_local_chunks")
     def test_fallback_is_returned_exactly_even_if_model_wraps_it(
         self,
-        mock_local_chunks,
         mock_get_vector_store,
         mock_get_llm,
+        _mock_rerank,
     ):
-        react_doc = make_doc(
-            "Bridging in Flutter is used for bridging native code in flutter side.",
-            source="data/flutter.docx",
+        unrelated_doc = make_doc(
+            "Kotlin coroutines are used for async work on Android services only.",
+            source="data/kotlin.txt",
         )
-        mock_local_chunks.return_value = (react_doc,)
-        mock_get_vector_store.side_effect = RuntimeError("vector store unavailable")
+        mock_get_vector_store.return_value = FakeVectorStore(
+            relevance_results=[(unrelated_doc, 0.2)],
+        )
         mock_get_llm.return_value = FakeLLM(
             "I am happy to help. Sorry, I don't have this information in my knowledge base."
         )
@@ -209,14 +223,14 @@ class ChatbotBehaviorTests(unittest.TestCase):
 
         self.assertEqual(response, EXACT_FALLBACK_RESPONSE)
 
+    @patch("app.chat.chatbot.rerank_pairs", side_effect=identity_rerank)
     @patch("app.chat.chatbot.get_llm")
     @patch("app.chat.chatbot.get_vector_store")
-    @patch("app.chat.chatbot._get_local_chunks")
     def test_real_life_example_query_prefers_example_heavy_abstraction_chunk(
         self,
-        mock_local_chunks,
         mock_get_vector_store,
         mock_get_llm,
+        _mock_rerank,
     ):
         generic_doc = make_doc(
             "Example: introduce an abstraction interface between modules.",
@@ -226,8 +240,9 @@ class ChatbotBehaviorTests(unittest.TestCase):
             "Real-Life Analogy: Abstraction -> You just press Withdraw and do not see the backend banking system.",
             source="data/OOP.docx",
         )
-        mock_local_chunks.return_value = (generic_doc, example_doc)
-        mock_get_vector_store.side_effect = RuntimeError("vector store unavailable")
+        mock_get_vector_store.return_value = FakeVectorStore(
+            relevance_results=[(generic_doc, 0.7), (example_doc, 0.6)],
+        )
         fake_llm = FakeLLM("Abstraction real-life example answer")
         mock_get_llm.return_value = fake_llm
 
@@ -238,6 +253,32 @@ class ChatbotBehaviorTests(unittest.TestCase):
             fake_llm.prompts[0].find(example_doc.page_content),
             fake_llm.prompts[0].find(generic_doc.page_content),
         )
+
+    @patch("app.chat.chatbot.rerank_pairs", side_effect=identity_rerank)
+    @patch("app.chat.chatbot.get_llm")
+    @patch("app.chat.chatbot.get_vector_store")
+    def test_return_sources_includes_metadata(
+        self,
+        mock_get_vector_store,
+        mock_get_llm,
+        _mock_rerank,
+    ):
+        debouncing_doc = make_doc(
+            "Debouncing delays execution until inactivity stops.",
+            source="data/React Native Notes/React_Native_Interview_Knowledge_Base.md",
+            header_2="Debouncing",
+        )
+        mock_get_vector_store.return_value = FakeVectorStore(
+            relevance_results=[(debouncing_doc, 0.9)],
+        )
+        mock_get_llm.return_value = FakeLLM("Debouncing answer")
+
+        answer, sources = ask_question("debouncing", return_sources=True)
+
+        self.assertEqual(answer, "Debouncing answer")
+        self.assertEqual(len(sources), 1)
+        self.assertIn("React_Native", sources[0]["source"])
+        self.assertEqual(sources[0]["heading"], "Debouncing")
 
 
 class DocumentLoaderTests(unittest.TestCase):

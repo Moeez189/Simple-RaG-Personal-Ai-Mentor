@@ -10,6 +10,8 @@ RAG-based interview prep for mobile development (Flutter, React Native, JavaScri
 uv run main.py
 ```
 
+Follow-up questions use chat history (e.g. ask **“What is abstraction?”**, then **“give me an example”**).
+
 ## Data workflow (do this after editing notes)
 
 1. Edit files under `data/` using the rules in [`data/README.md`](data/README.md)
@@ -45,6 +47,12 @@ OLLAMA_GOLDEN_E2E=1 uv run python -m unittest tests.test_golden_e2e_live -v
 ```
 
 Golden questions: [`tests/golden_qa.json`](tests/golden_qa.json) — add a row per new topic. See [`IMPROVEMENTS.md`](IMPROVEMENTS.md) section 2.
+
+Tune retrieval thresholds (optional, uses Chroma):
+
+```bash
+uv run python -m scripts.tune_retrieval_params
+```
 
 ## Document formatting for RAG
 

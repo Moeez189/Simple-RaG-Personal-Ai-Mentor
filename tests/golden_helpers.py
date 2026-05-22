@@ -12,19 +12,20 @@ def load_golden_cases():
 
 def evaluate_retrieval(case, retrieve_fn) -> str | None:
     question = case["question"]
+    history = case.get("history")
     expect = case["expect"]
 
     if expect in {"greeting", "answer"}:
         return None
 
     if expect == "fallback":
-        results = retrieve_fn(question)
+        results = retrieve_fn(question, history=history)
         if results:
             return f"expected no retrieval, got {len(results)} chunk(s)"
         return None
 
     if expect == "retrieve":
-        results = retrieve_fn(question)
+        results = retrieve_fn(question, history=history)
         if not results:
             return "expected retrieval, got none"
 

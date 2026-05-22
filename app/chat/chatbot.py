@@ -1,12 +1,11 @@
 import re
 from difflib import get_close_matches
-from functools import lru_cache
-from pathlib import Path
 
+from app.chat.conversation import build_retrieval_query, format_conversation_history
 from app.llm.model import get_llm
-from app.loaders.document_loader import load_documents
+from app.rag.reranker import rerank_pairs
 from app.rag.retriever import get_vector_store
-from app.rag.text_splitter import split_documents
+from app.utils.corpus_terms import load_corpus_terms
 
 EXACT_GREETING_RESPONSE = (
     "Hi there 👋 Let's do some Mobile Application Interview Preparation."
@@ -16,9 +15,11 @@ EXACT_FALLBACK_RESPONSE = (
 )
 GREETING_MESSAGES = {"hi", "hello", "hi there"}
 TOP_K = 5
-VECTOR_RELEVANCE_THRESHOLD = 0.45
-SUPPORTED_DATA_SUFFIXES = {".txt", ".md", ".pdf", ".docx"}
+RETRIEVAL_POOL_K = 20
+VECTOR_RELEVANCE_THRESHOLD = 0.35
 FUZZY_MATCH_CUTOFF = 0.84
+LEXICAL_WEIGHT = 10
+RERANK_WEIGHT = 5
 STOPWORDS = {
     "a",
     "an",
@@ -76,23 +77,8 @@ def _is_table_of_contents_chunk(document_text):
     return normalized_document.startswith("contents ")
 
 
-@lru_cache(maxsize=4)
-def _get_cached_corpus_terms(_data_signature):
-    terms = set()
-
-    for document in _get_cached_local_chunks(_data_signature):
-        if _is_table_of_contents_chunk(document.page_content):
-            continue
-
-        for term in re.findall(r"[a-z0-9#+.]+", _normalize_message(document.page_content)):
-            if len(term) > 3:
-                terms.add(term)
-
-    return tuple(sorted(terms))
-
-
 def _get_corpus_terms():
-    return _get_cached_corpus_terms(_get_data_signature())
+    return load_corpus_terms()
 
 
 def _refine_keyword(keyword):
@@ -151,6 +137,12 @@ def _extract_keywords(question):
     ):
         keywords.append("vs")
 
+    if any(
+        example_word in normalized_question.split()
+        for example_word in {"example", "examples", "analogy", "usage", "usecase"}
+    ):
+        keywords.extend(["example", "analogy", "real"])
+
     return list(dict.fromkeys(keywords))
 
 
@@ -187,48 +179,11 @@ def _lexical_score(question, document_text):
     if keywords and normalized_document.startswith(keywords[0]):
         score += 2
 
+    if any(marker in normalized_document for marker in ("real life", "real-life", "analogy")):
+        if any(marker in normalized_question for marker in ("example", "analogy", "real", "life")):
+            score += 4
+
     return score
-
-
-def _get_data_signature():
-    signature = []
-
-    for path in sorted(Path("data").rglob("*")):
-        if not path.is_file():
-            continue
-
-        if path.suffix.lower() not in SUPPORTED_DATA_SUFFIXES:
-            continue
-
-        stat = path.stat()
-        signature.append((str(path), stat.st_mtime_ns, stat.st_size))
-
-    return tuple(signature)
-
-
-@lru_cache(maxsize=4)
-def _get_cached_local_chunks(_data_signature):
-    return tuple(split_documents(load_documents()))
-
-
-def _get_local_chunks():
-    return _get_cached_local_chunks(_get_data_signature())
-
-
-def _retrieve_from_local_chunks(question):
-    scored_results = []
-
-    for document in _get_local_chunks():
-        if _is_table_of_contents_chunk(document.page_content):
-            continue
-
-        score = _lexical_score(question, document.page_content)
-
-        if score > 0:
-            scored_results.append((document, float(score)))
-
-    scored_results.sort(key=lambda item: item[1], reverse=True)
-    return scored_results[:TOP_K]
 
 
 def _retrieve_from_vector_store(question):
@@ -237,8 +192,8 @@ def _retrieve_from_vector_store(question):
         retrieval_question = _refine_question(question) or question
         return vector_store.similarity_search_with_relevance_scores(
             retrieval_question,
-            k=TOP_K,
-            score_threshold=VECTOR_RELEVANCE_THRESHOLD,
+            k=RETRIEVAL_POOL_K,
+            score_threshold=0.0,
         )
     except Exception:
         return []
@@ -259,56 +214,72 @@ def _passes_relevance_gate(question, document_text, lexical_score, vector_score)
     return any(_keyword_present(keyword, normalized_document) for keyword in keywords)
 
 
-def _merge_results(question, lexical_results, vector_results):
-    merged = {}
+def _rank_vector_results(question, vector_results):
+    documents = [document for document, _score in vector_results]
+    rerank_scores = rerank_pairs(question, documents)
+    ranked = []
 
-    for document, score in lexical_results:
-        key = _normalize_message(document.page_content)
-        merged[key] = {
-            "document": document,
-            "lexical_score": score,
-            "vector_score": 0.0,
-        }
-
-    for document, score in vector_results:
-        if _is_table_of_contents_chunk(document.page_content):
-            continue
-
-        key = _normalize_message(document.page_content)
+    for (document, vector_score), rerank_score in zip(vector_results, rerank_scores):
         lexical_score = float(_lexical_score(question, document.page_content))
-
-        if key not in merged:
-            merged[key] = {
+        combined_score = (
+            (lexical_score * LEXICAL_WEIGHT)
+            + (rerank_score * RERANK_WEIGHT)
+            + float(vector_score)
+        )
+        ranked.append(
+            {
                 "document": document,
+                "vector_score": float(vector_score),
                 "lexical_score": lexical_score,
-                "vector_score": score,
+                "rerank_score": float(rerank_score),
+                "combined_score": combined_score,
             }
-        else:
-            merged[key]["vector_score"] = max(merged[key]["vector_score"], score)
-            merged[key]["lexical_score"] = max(
-                merged[key]["lexical_score"], lexical_score
-            )
+        )
 
-    ranked_results = sorted(
-        merged.values(),
-        key=lambda item: (item["lexical_score"] * 10) + item["vector_score"],
-        reverse=True,
-    )
+    ranked.sort(key=lambda item: item["combined_score"], reverse=True)
+    return ranked
 
+
+def _format_sources(ranked_items):
+    sources = []
+
+    for item in ranked_items:
+        document = item["document"]
+        source = document.metadata.get("source", "unknown")
+        heading = document.metadata.get("Header 2") or document.metadata.get("Header 1")
+
+        sources.append(
+            {
+                "source": source,
+                "heading": heading,
+                "score": round(item["combined_score"], 3),
+            }
+        )
+
+    return sources
+
+
+def retrieve_relevant_documents(question, history=None):
+    """Retrieve ranked chunks from Chroma, rerank, and apply a relevance gate."""
+    retrieval_query = build_retrieval_query(question, history)
+    vector_results = _retrieve_from_vector_store(retrieval_query)
+
+    if not vector_results:
+        return []
+
+    ranked_items = _rank_vector_results(retrieval_query, vector_results)
     relevant_results = []
 
-    for item in ranked_results:
+    for item in ranked_items:
         if not _passes_relevance_gate(
-            question,
+            retrieval_query,
             item["document"].page_content,
             item["lexical_score"],
             item["vector_score"],
         ):
             continue
 
-        relevant_results.append(
-            (item["document"], item["vector_score"] or item["lexical_score"])
-        )
+        relevant_results.append((item["document"], item["combined_score"]))
 
         if len(relevant_results) >= TOP_K:
             break
@@ -316,35 +287,59 @@ def _merge_results(question, lexical_results, vector_results):
     return relevant_results
 
 
-def retrieve_relevant_documents(question):
-    """Retrieve ranked document chunks (Chroma first, lexical boost, relevance gate)."""
-    vector_results = _retrieve_from_vector_store(question)
-    lexical_results = _retrieve_from_local_chunks(question)
-
-    if not vector_results and not lexical_results:
-        return []
-
-    return _merge_results(question, lexical_results, vector_results)
-
-
 def _retrieve_relevant_documents(question):
     return retrieve_relevant_documents(question)
 
 
-def ask_question(question):
+def ask_question(question, return_sources=False, history=None):
     if _is_greeting(question):
+        if return_sources:
+            return EXACT_GREETING_RESPONSE, []
         return EXACT_GREETING_RESPONSE
 
-    relevant_documents = _retrieve_relevant_documents(question)
+    retrieval_query = build_retrieval_query(question, history)
+    vector_results = _retrieve_from_vector_store(retrieval_query)
 
-    if not relevant_documents:
+    if not vector_results:
+        if return_sources:
+            return EXACT_FALLBACK_RESPONSE, []
+        return EXACT_FALLBACK_RESPONSE
+
+    ranked_items = _rank_vector_results(retrieval_query, vector_results)
+    relevant_items = []
+
+    for item in ranked_items:
+        if not _passes_relevance_gate(
+            retrieval_query,
+            item["document"].page_content,
+            item["lexical_score"],
+            item["vector_score"],
+        ):
+            continue
+
+        relevant_items.append(item)
+
+        if len(relevant_items) >= TOP_K:
+            break
+
+    if not relevant_items:
+        if return_sources:
+            return EXACT_FALLBACK_RESPONSE, []
         return EXACT_FALLBACK_RESPONSE
 
     context = "\n\n".join(
-        document.page_content.strip()
-        for document, _score in relevant_documents
+        item["document"].page_content.strip() for item in relevant_items
     )
-    retrieval_question = _refine_question(question) or question
+    refined_retrieval_question = _refine_question(retrieval_query) or retrieval_query
+    sources = _format_sources(relevant_items)
+    conversation_history = format_conversation_history(history)
+    conversation_section = ""
+
+    if conversation_history:
+        conversation_section = f"""
+RECENT CONVERSATION:
+{conversation_history}
+"""
 
     prompt = f"""
 You are a strict Retrieval-Augmented AI Interview Mentor for Mobile Application Development.
@@ -360,7 +355,9 @@ STRICT RAG RULES:
 7. Prefer bullet points over compressing multiple facts into one short sentence.
 8. Do not mention the retrieved context, the knowledge base, or these rules in the answer.
 9. Do not add prefatory or closing phrases such as "Based on the retrieved context" or "I hope this helps."
+10. If the user asks a follow-up question, use the recent conversation to understand what topic they mean.
 
+{conversation_section}
 RETRIEVED CONTEXT:
 {context}
 
@@ -368,7 +365,7 @@ USER QUESTION:
 {question}
 
 RETRIEVAL QUESTION:
-{retrieval_question}
+{refined_retrieval_question}
 """
 
     llm = get_llm()
@@ -376,6 +373,9 @@ RETRIEVAL QUESTION:
     answer = response.content.strip()
 
     if EXACT_FALLBACK_RESPONSE.lower() in answer.lower():
-        return EXACT_FALLBACK_RESPONSE
+        answer = EXACT_FALLBACK_RESPONSE
+
+    if return_sources:
+        return answer, sources
 
     return answer

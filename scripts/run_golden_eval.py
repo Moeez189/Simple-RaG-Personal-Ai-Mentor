@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from app.chat.chatbot import ask_question, retrieve_relevant_documents
 from tests.golden_helpers import evaluate_answer, evaluate_retrieval, load_golden_cases
+from tests.test_golden_retrieval import identity_rerank
 
 
 class FakeLLM:
@@ -24,14 +25,21 @@ def run_retrieval(cases) -> tuple[int, int, list[str]]:
     failed = 0
     failures = []
 
+    with patch("app.chat.chatbot.rerank_pairs", side_effect=identity_rerank):
+        return _run_retrieval_cases(cases)
+
+
+def _run_retrieval_cases(cases) -> tuple[int, int, list[str]]:
+    passed = 0
+    failed = 0
+    failures = []
+
     for case in cases:
         if case["expect"] not in {"retrieve", "fallback"}:
             continue
 
         if case["expect"] == "fallback":
-            with patch(
-                "app.chat.chatbot._retrieve_from_vector_store", return_value=[]
-            ), patch("app.chat.chatbot._retrieve_from_local_chunks", return_value=[]):
+            with patch("app.chat.chatbot._retrieve_from_vector_store", return_value=[]):
                 error = evaluate_retrieval(case, retrieve_relevant_documents)
         else:
             error = evaluate_retrieval(case, retrieve_relevant_documents)
@@ -48,6 +56,11 @@ def run_retrieval(cases) -> tuple[int, int, list[str]]:
 
 
 def run_e2e(cases) -> tuple[int, int, list[str]]:
+    with patch("app.chat.chatbot.rerank_pairs", side_effect=identity_rerank):
+        return _run_e2e_cases(cases)
+
+
+def _run_e2e_cases(cases) -> tuple[int, int, list[str]]:
     passed = 0
     failed = 0
     failures = []

@@ -13,8 +13,10 @@ Track progress for **personal-ai-mentor** (simple RAG, not agent RAG).
 | Stage | Score | Status |
 |-------|-------|--------|
 | Starting point | ~6.5 / 10 | — |
-| After data quality + Chroma-first + golden tests | **~7.5 / 10** | ✅ Current |
-| Target (rerank + metadata + full eval) | ~8.5 / 10 | ⬜ Future |
+| After data quality + Chroma-first + golden tests | **~7.5 / 10** | ✅ |
+| After section 3 (Chroma-only + rerank + sources + tuning) | **~8 / 10** | ✅ |
+| After section 4 (chat history + follow-up retrieval) | **~8.5 / 10** | ✅ Current |
+| Target (git baseline + more golden follow-ups) | ~9 / 10 | ⬜ Future |
 
 ---
 
@@ -71,13 +73,13 @@ uv run python -m scripts.ingest
 | # | Task | Status | What was done |
 |---|------|--------|----------------|
 | 3.1 | Always query Chroma (not lexical-only first) | ✅ Done | `retrieve_relevant_documents()` in `app/chat/chatbot.py` |
-| 3.2 | Merge vector + lexical scores | ✅ Done | `_merge_results()` ranks `lexical*10 + vector` |
+| 3.2 | Merge vector + lexical scores | ✅ Done | Combined score: `lexical*10 + rerank*5 + vector` |
 | 3.3 | Relevance gate (block unrelated vector hits) | ✅ Done | `_passes_relevance_gate()` |
 | 3.4 | Public `retrieve_relevant_documents` for tests | ✅ Done | Exported for unit/golden tests |
-| 3.5 | Single retrieval source (remove live re-split at query time) | ⬜ Not started | Still uses `_get_local_chunks()` + Chroma |
-| 3.6 | Show `source` metadata in Gradio UI | ⬜ Not started | Helps debug wrong answers |
-| 3.7 | Cross-encoder / reranker on top-k | ⬜ Not started | Improves chunk ranking before LLM |
-| 3.8 | Tune `TOP_K`, `VECTOR_RELEVANCE_THRESHOLD` via golden set | ⬜ Not started | Data-driven tuning |
+| 3.5 | Single retrieval source (Chroma only at query time) | ✅ Done | Removed `_get_local_chunks()`; fuzzy terms from `app/utils/corpus_terms.py` |
+| 3.6 | Show `source` metadata in Gradio UI | ✅ Done | `ask_question(..., return_sources=True)` + footer in `gradio_ui.py` |
+| 3.7 | Cross-encoder reranker on top-k | ✅ Done | `app/rag/reranker.py` (`ms-marco-MiniLM-L-6-v2`) |
+| 3.8 | Tune `TOP_K`, `VECTOR_RELEVANCE_THRESHOLD` via golden set | ✅ Done | `TOP_K=5`, `VECTOR_RELEVANCE_THRESHOLD=0.35`; script: `scripts/tune_retrieval_params.py` |
 
 ---
 
@@ -88,8 +90,8 @@ uv run python -m scripts.ingest
 | 4.1 | Strict RAG prompt + exact fallback | ✅ Done | `ask_question()` in `chatbot.py` |
 | 4.2 | Greeting shortcut (no LLM) | ✅ Done | `GREETING_MESSAGES` |
 | 4.3 | Typo / fuzzy keyword refinement | ✅ Done | `_refine_keyword`, `_refine_question` |
-| 4.4 | Use chat history for follow-up questions | ⬜ Not started | Gradio `history` ignored in `gradio_ui.py` |
-| 4.5 | Conversation memory in retrieval query | ⬜ Not started | e.g. “give an example” after “abstraction” |
+| 4.4 | Use chat history for follow-up questions | ✅ Done | `gradio_ui.py` passes `history` to `ask_question()` |
+| 4.5 | Conversation memory in retrieval query | ✅ Done | `app/chat/conversation.py` expands follow-ups for retrieval + prompt |
 
 ---
 
@@ -115,12 +117,9 @@ uv run python -m scripts.ingest
 
 ## Suggested order for remaining work
 
-1. ⬜ **3.6** — Show source file in chat UI (quick win)
-2. ⬜ **2.6** — Add golden cases when you add new `data/` files
-3. ⬜ **3.5** — Rely on Chroma only at query time (simpler, faster)
-4. ⬜ **3.7** — Reranker (bigger retrieval gain)
-5. ⬜ **4.4** — Chat history for follow-ups
-6. ⬜ **5.3** — Git commit baseline
+1. ⬜ **2.6** — Add golden cases when you add new `data/` files
+2. ⬜ **5.3** — Git commit baseline
+3. ⬜ **5.4** — Verify `.env` is gitignored
 
 ---
 
@@ -134,6 +133,7 @@ uv run python -m scripts.ingest
 | Golden mocked E2E | `uv run python -m scripts.run_golden_eval --e2e` |
 | Golden unit tests | `uv run python -m unittest tests.test_golden_retrieval tests.test_golden_e2e -v` |
 | Golden live Ollama E2E | `OLLAMA_GOLDEN_E2E=1 uv run python -m unittest tests.test_golden_e2e_live -v` |
+| Tune retrieval params | `uv run python -m scripts.tune_retrieval_params` |
 | All tests | `uv run python -m unittest discover -s tests -v` |
 | Run app | `uv run main.py` |
 

@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -19,6 +20,10 @@ class FakeVectorStore:
         return self.relevance_results
 
 
+def identity_rerank(_question, documents):
+    return [1.0] * len(documents)
+
+
 class GoldenRetrievalTests(unittest.TestCase):
     def test_golden_file_has_expanded_set(self):
         cases = load_golden_cases()
@@ -26,9 +31,11 @@ class GoldenRetrievalTests(unittest.TestCase):
         self.assertGreaterEqual(len(cases), 25)
         self.assertGreaterEqual(len(retrieve_cases), 18)
 
-    @patch("app.chat.chatbot.get_vector_store")
-    def test_golden_retrieval_expectations(self, mock_get_vector_store):
-        mock_get_vector_store.return_value = FakeVectorStore()
+    @patch("app.chat.chatbot.rerank_pairs", side_effect=identity_rerank)
+    def test_golden_retrieval_expectations(self, _mock_rerank):
+        if not Path("chroma_db").exists():
+            self.skipTest("chroma_db missing — run: uv run python -m scripts.ingest")
+
         failures = []
 
         for case in load_golden_cases():
@@ -36,11 +43,7 @@ class GoldenRetrievalTests(unittest.TestCase):
                 continue
 
             if case["expect"] == "fallback":
-                with patch(
-                    "app.chat.chatbot._retrieve_from_vector_store", return_value=[]
-                ), patch(
-                    "app.chat.chatbot._retrieve_from_local_chunks", return_value=[]
-                ):
+                with patch("app.chat.chatbot._retrieve_from_vector_store", return_value=[]):
                     error = evaluate_retrieval(case, retrieve_relevant_documents)
             else:
                 error = evaluate_retrieval(case, retrieve_relevant_documents)
@@ -62,29 +65,9 @@ class GoldenGreetingTests(unittest.TestCase):
             self.assertIsNone(evaluate_answer(case, ask_question(case["question"])))
 
 
-class ChromaFirstRetrievalTests(unittest.TestCase):
-    def test_vector_and_lexical_are_merged(self):
-        vector_doc = SimpleNamespace(
-            page_content="Debouncing delays execution until inactivity stops.",
-            metadata={"source": "data/rn.md"},
-        )
-        lexical_doc = SimpleNamespace(
-            page_content="Debouncing delays execution until inactivity stops.",
-            metadata={"source": "data/rn.md"},
-        )
-
-        with patch(
-            "app.chat.chatbot._retrieve_from_vector_store",
-            return_value=[(vector_doc, 0.9)],
-        ), patch(
-            "app.chat.chatbot._retrieve_from_local_chunks",
-            return_value=[(lexical_doc, 4.0)],
-        ):
-            results = retrieve_relevant_documents("debouncing")
-
-        self.assertEqual(len(results), 1)
-
-    def test_unrelated_vector_match_is_filtered_without_lexical_overlap(self):
+class ChromaRetrievalTests(unittest.TestCase):
+    @patch("app.chat.chatbot.rerank_pairs", side_effect=identity_rerank)
+    def test_unrelated_vector_match_is_filtered_without_lexical_overlap(self, _mock_rerank):
         unrelated_doc = SimpleNamespace(
             page_content="This is about Flutter widgets only.",
             metadata={"source": "data/flutter.md"},
@@ -93,16 +76,16 @@ class ChromaFirstRetrievalTests(unittest.TestCase):
         with patch(
             "app.chat.chatbot._retrieve_from_vector_store",
             return_value=[(unrelated_doc, 0.95)],
-        ), patch("app.chat.chatbot._retrieve_from_local_chunks", return_value=[]):
+        ):
             results = retrieve_relevant_documents("What is mechanical engineering?")
 
         self.assertEqual(results, [])
 
+    @patch("app.chat.chatbot.rerank_pairs", side_effect=identity_rerank)
     @patch("app.chat.chatbot.get_llm")
     @patch("app.chat.chatbot.get_vector_store")
-    @patch("app.chat.chatbot._get_local_chunks", return_value=())
     def test_fallback_when_retrieval_empty(
-        self, _mock_local_chunks, mock_get_vector_store, _mock_llm
+        self, mock_get_vector_store, _mock_llm, _mock_rerank
     ):
         mock_get_vector_store.return_value = FakeVectorStore()
 
